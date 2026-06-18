@@ -1,3 +1,4 @@
+import { Address } from "@ton/ton";
 import { Router } from "express";
 import { z } from "zod";
 import { getDb } from "../db/mongo.js";
@@ -6,14 +7,23 @@ import { buildReferralSummary } from "../services/stonfiClient.js";
 
 const router = Router();
 
-const walletSchema = z
-  .string()
-  .trim()
-  .min(32)
-  .max(128)
-  .regex(/^[A-Za-z0-9_:\-=]+$/, "Wallet must be a valid TON address string");
+const walletSchema = z.string().trim().min(1, "Wallet is required");
 
-const parseWallet = (value: string) => walletSchema.parse(value);
+const parseWallet = (value: string) => {
+  const wallet = walletSchema.parse(value);
+
+  try {
+    return Address.parse(wallet).toString({ bounceable: true });
+  } catch {
+    throw new z.ZodError([
+      {
+        code: z.ZodIssueCode.custom,
+        message: "Wallet must be a valid TON address string",
+        path: ["wallet"]
+      }
+    ]);
+  }
+};
 
 const saveSnapshot = async (snapshot: StoredReferralSnapshot) => {
   const db = await getDb();

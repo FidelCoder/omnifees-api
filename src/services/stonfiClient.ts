@@ -9,7 +9,7 @@ const pickString = (record: Record<string, unknown>, keys: string[]) => {
     if (typeof value === "string" && value.trim().length > 0) {
       return value;
     }
-    if (typeof value === "number") {
+    if (typeof value === "number" || typeof value === "bigint") {
       return String(value);
     }
   }
@@ -50,18 +50,33 @@ const arrayFromPayload = (payload: unknown): Record<string, unknown>[] => {
   return [];
 };
 
+const parseJson = (text: string) => {
+  if (!text) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
+};
+
 const getJson = async (path: string, name: string): Promise<{ data: unknown; source: SourceReport }> => {
   const url = `${normalizeBaseUrl(env.stonfiApiBaseUrl)}${path}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), env.stonfiRequestTimeoutMs);
 
   try {
     const response = await fetch(url, {
       headers: {
         accept: "application/json"
-      }
+      },
+      signal: controller.signal
     });
 
     const text = await response.text();
-    const data = text ? (JSON.parse(text) as unknown) : null;
+    const data = parseJson(text);
 
     if (!response.ok) {
       return {
@@ -84,16 +99,33 @@ const getJson = async (path: string, name: string): Promise<{ data: unknown; sou
       }
     };
   } catch (error) {
+    const timedOut = error instanceof Error && error.name === "AbortError";
+
     return {
       data: null,
       source: {
         name,
         url,
         status: "error",
-        detail: error instanceof Error ? error.message : "Unknown request error"
+        detail: timedOut ? `STON.fi API timed out after ${env.stonfiRequestTimeoutMs}ms` : error instanceof Error ? error.message : "Unknown request error"
       }
     };
+  } finally {
+    clearTimeout(timeout);
   }
+};
+
+const hasPositiveBalance = (balance?: string) => {
+  if (!balance) {
+    return false;
+  }
+
+  const normalized = balance.trim();
+  if (!normalized || normalized === "0") {
+    return false;
+  }
+
+  return Number(normalized) > 0 || /^0*[1-9]/.test(normalized);
 };
 
 const normalizeVault = (raw: Record<string, unknown>): FeeVault => ({
@@ -109,7 +141,7 @@ const normalizeVault = (raw: Record<string, unknown>): FeeVault => ({
 export const buildReferralSummary = async (wallet: string): Promise<ReferralSummary> => {
   const vaultResponse = await getJson(`/v1/wallets/${encodeURIComponent(wallet)}/fee_vaults`, "STON.fi DEX v2 fee vaults");
   const vaults = arrayFromPayload(vaultResponse.data).map(normalizeVault);
-  const claimableVaults = vaults.filter((vault) => vault.claimable || Boolean(vault.balance && vault.balance !== "0")).length;
+  const claimableVaults = vaults.filter((vault) => vault.claimable || hasPositiveBalance(vault.balance)).length;
 
   return {
     wallet,
