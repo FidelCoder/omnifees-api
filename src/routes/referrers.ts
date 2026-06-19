@@ -25,14 +25,50 @@ const parseWallet = (value: string) => {
   }
 };
 
-const saveSnapshot = async (snapshot: StoredReferralSnapshot) => {
-  const db = await getDb();
-  if (!db) {
-    return false;
-  }
+const formatPersistenceError = (error: unknown) =>
+  error instanceof Error ? error.message : "Snapshot persistence is unavailable.";
 
-  await db.collection<StoredReferralSnapshot>("referral_snapshots").insertOne(snapshot);
-  return true;
+const saveSnapshot = async (snapshot: StoredReferralSnapshot) => {
+  try {
+    const db = await getDb();
+    if (!db) {
+      return { persisted: false, persistenceError: "MongoDB is not configured." };
+    }
+
+    await db.collection<StoredReferralSnapshot>("referral_snapshots").insertOne(snapshot);
+    return { persisted: true };
+  } catch (error) {
+    return { persisted: false, persistenceError: formatPersistenceError(error) };
+  }
+};
+
+const loadSnapshots = async (wallet: string) => {
+  try {
+    const db = await getDb();
+
+    if (!db) {
+      return {
+        wallet,
+        snapshots: [],
+        note: "Set MONGODB_URI to enable stored referral snapshots."
+      };
+    }
+
+    const snapshots = await db
+      .collection<StoredReferralSnapshot>("referral_snapshots")
+      .find({ wallet })
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .toArray();
+
+    return { wallet, snapshots };
+  } catch (error) {
+    return {
+      wallet,
+      snapshots: [],
+      note: `Snapshot store is unavailable: ${formatPersistenceError(error)}`
+    };
+  }
 };
 
 router.get("/:wallet/summary", async (req, res, next) => {
@@ -52,14 +88,15 @@ router.post("/:wallet/sync", async (req, res, next) => {
   try {
     const wallet = parseWallet(req.params.wallet);
     const summary = await buildReferralSummary(wallet);
-    const persisted = await saveSnapshot({
+    const persistence = await saveSnapshot({
       ...summary,
       createdAt: new Date()
     });
 
     res.status(201).json({
       ...summary,
-      persisted
+      persisted: persistence.persisted,
+      persistenceError: persistence.persistenceError
     });
   } catch (error) {
     next(error);
@@ -69,28 +106,7 @@ router.post("/:wallet/sync", async (req, res, next) => {
 router.get("/:wallet/snapshots", async (req, res, next) => {
   try {
     const wallet = parseWallet(req.params.wallet);
-    const db = await getDb();
-
-    if (!db) {
-      res.json({
-        wallet,
-        snapshots: [],
-        note: "Set MONGODB_URI to enable stored referral snapshots."
-      });
-      return;
-    }
-
-    const snapshots = await db
-      .collection<StoredReferralSnapshot>("referral_snapshots")
-      .find({ wallet })
-      .sort({ createdAt: -1 })
-      .limit(20)
-      .toArray();
-
-    res.json({
-      wallet,
-      snapshots
-    });
+    res.json(await loadSnapshots(wallet));
   } catch (error) {
     next(error);
   }

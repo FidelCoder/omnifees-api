@@ -9,7 +9,9 @@ export const getDb = async (): Promise<Db | null> => {
   }
 
   if (!client) {
-    client = new MongoClient(env.mongoUri);
+    client = new MongoClient(env.mongoUri, {
+      serverSelectionTimeoutMS: env.mongoServerSelectionTimeoutMs
+    });
     await client.connect();
   }
 

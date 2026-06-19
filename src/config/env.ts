@@ -15,6 +15,7 @@ export const env = {
   nodeEnv: optional(process.env.NODE_ENV, "development"),
   mongoUri: process.env.MONGODB_URI?.trim() || "",
   mongoDbName: optional(process.env.MONGODB_DB, "omnifees"),
+  mongoServerSelectionTimeoutMs: optionalNumber(process.env.MONGODB_SERVER_SELECTION_TIMEOUT_MS, 5000),
   corsOrigin: optional(process.env.CORS_ORIGIN, "*"),
   stonfiApiBaseUrl: optional(process.env.STONFI_API_BASE_URL, "https://api.ston.fi"),
   stonfiRequestTimeoutMs: optionalNumber(process.env.STONFI_REQUEST_TIMEOUT_MS, 10000)
